@@ -1,6 +1,6 @@
 # SnapBar
 
-![SnapBar Logo](public/snapbar.svg)
+![SnapBar Logo](src-tauri/icons/app-icon.svg)
 
 SnapBar 是一个基于 `Tauri + React + TypeScript` 构建的 Windows 桌面效率工具，用来管理和快速输入常用提示词、模板文本、代码片段和固定回复。
 
