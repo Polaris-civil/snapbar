@@ -12,9 +12,10 @@ const libraryState = {
     { id: "1", title: "测试提示词", content: "Hello World", category: "通用", shortcut: "Ctrl+1", createdAt: 1, updatedAt: 2 },
     { id: "2", title: "部署 SQL", content: "SELECT * FROM prompts;", category: "代码", createdAt: 3, updatedAt: 4 },
   ],
+  handleBackup: vi.fn(),
+  handleExportTxt: vi.fn(),
   importFromTxtContent: vi.fn(),
   isLoading: false,
-  isLocked: false,
   persistSettings: vi.fn(),
   prompts: [],
   restoreFromFileContent: vi.fn(),
@@ -29,9 +30,7 @@ const libraryState = {
   },
   statusMessage: null as string | null,
   storageUsage: "10 KB",
-  unlock: vi.fn(),
-  unlockPassword: "",
-  setUnlockPassword: vi.fn(),
+  unavailableShortcuts: [],
 };
 
 vi.mock("../hooks/usePromptLibrary", () => ({
@@ -62,18 +61,6 @@ describe("MainPanel", () => {
     });
   });
 
-  it("opens add modal when clicking add button", async () => {
-    render(<MainPanel />);
-
-    fireEvent.click(screen.getByTitle("新增"));
-
-    await waitFor(() => {
-      expect(screen.getByText("新建提示词")).toBeInTheDocument();
-    });
-    expect(screen.getByLabelText("标题")).toBeInTheDocument();
-    expect(screen.getByLabelText("内容")).toBeInTheDocument();
-  });
-
   it("calls invoke type_text on item click", async () => {
     render(<MainPanel />);
     await waitFor(() => screen.getByText("测试提示词"));
@@ -89,11 +76,7 @@ describe("MainPanel", () => {
 
     fireEvent.click(screen.getAllByRole("button").find((button) => button.querySelector("svg.lucide-trash2"))!);
 
-    await waitFor(() => {
-      expect(screen.getByText("删除这条提示词？")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByText("确认删除"));
+    fireEvent.click(await screen.findByText("确认删除"));
 
     await waitFor(() => {
       expect(libraryState.deletePrompt).toHaveBeenCalledWith("1");

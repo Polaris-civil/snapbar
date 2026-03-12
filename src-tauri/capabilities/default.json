@@ -5,12 +5,18 @@
   "windows": ["main", "fab"],
   "permissions": [
     "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
     "opener:default",
     "store:default",
-    "fs:default",
+    "fs:allow-write-text-file",
+    "fs:allow-read-text-file",
+    "fs:allow-read-file",
+    "fs:allow-open",
+    "fs:allow-create",
     {
       "identifier": "fs:scope",
-      "allow": [{ "path": "$APPCONFIG/**" }, { "path": "$DOWNLOAD/**" }, { "path": "$DESKTOP/**" }, { "path": "$DOCUMENT/**" }]
+      "allow": [{ "path": "$APPCONFIG/**" }, { "path": "$DOWNLOAD/**" }, { "path": "$DESKTOP/**" }, { "path": "$DOCUMENT/**" }, { "path": "$HOME/**" }]
     },
     "core:window:allow-start-dragging",
     "core:window:allow-set-always-on-top",

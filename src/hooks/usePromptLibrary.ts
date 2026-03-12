@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
-import { setSessionPassword } from "../lib/crypto";
 import {
+  backupData,
+  exportPromptsTxt,
   getPromptsUpdatedEventName,
   getStorageUsage,
   importPromptsTxt,
@@ -32,12 +33,11 @@ export function usePromptLibrary() {
   const [prompts, setPrompts] = useState<PromptItem[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [storageUsage, setStorageUsage] = useState("0 KB");
-  const [unlockPassword, setUnlockPasswordState] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>(ALL_CATEGORIES_FILTER);
   const [isLoading, setIsLoading] = useState(true);
-  const [isLocked, setIsLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [unavailableShortcuts, setUnavailableShortcuts] = useState<string[]>([]);
 
   const syncShortcuts = useCallback(async (promptList: PromptItem[]) => {
     const bindings: ShortcutBinding[] = promptList
@@ -49,12 +49,11 @@ export function usePromptLibrary() {
 
     try {
       const result = await invoke<ShortcutSyncResult>("update_prompt_shortcuts", { bindings });
-      if (result.failed.length > 0) {
-        setError(`以下快捷键不可用：${result.failed.join("、")}`);
-      }
+      setUnavailableShortcuts(result.failed);
       return result;
     } catch (syncError) {
       console.error(syncError);
+      setUnavailableShortcuts([]);
       setError("快捷键同步失败，请检查桌面端权限。");
       return { registered: [], failed: [] };
     }
@@ -71,15 +70,10 @@ export function usePromptLibrary() {
         setPrompts(loadedPrompts);
         setSettings(loadedSettings);
         setStorageUsage(getStorageUsage());
-        setIsLocked(false);
       });
     } catch (loadError) {
-      if (loadError instanceof Error && loadError.message === "LOCKED") {
-        setIsLocked(true);
-      } else {
-        console.error(loadError);
-        setError("提示词库加载失败。");
-      }
+      console.error(loadError);
+      setError("提示词库加载失败。");
     } finally {
       setIsLoading(false);
     }
@@ -157,8 +151,14 @@ export function usePromptLibrary() {
       await savePrompts(nextPrompts);
       const result = await syncShortcuts(nextPrompts);
       setStorageUsage(getStorageUsage());
-      setError(result.failed.length > 0 ? `以下快捷键不可用：${result.failed.join("、")}` : null);
-      setStatusMessage(editingId ? "提示词已更新。" : "提示词已创建。");
+      setError(null);
+      setStatusMessage(
+        result.failed.length > 0
+          ? "部分快捷键未能注册，请查看对应按钮下方的快捷键索引。"
+          : editingId
+            ? "提示词已更新。"
+            : "提示词已创建。",
+      );
       return true;
     },
     [prompts, syncShortcuts],
@@ -176,46 +176,17 @@ export function usePromptLibrary() {
     [prompts, syncShortcuts],
   );
 
-  const persistSettings = useCallback(
-    async (nextSettings: AppSettings, password?: string) => {
-      setSettings(nextSettings);
-      await saveSettings(nextSettings);
-
-      if (password) {
-        setSessionPassword(password);
-        setUnlockPasswordState("");
-        await savePrompts(prompts);
-        setStatusMessage("设置已保存，本次会话已启用加密。");
-      } else {
-        setStatusMessage("设置已保存。");
-      }
-    },
-    [prompts],
-  );
-
-  const unlock = useCallback(async () => {
-    setSessionPassword(unlockPassword);
-    try {
-      const loaded = await loadPrompts();
-      setPrompts(loaded);
-      await syncShortcuts(loaded);
-      setStorageUsage(getStorageUsage());
-      setIsLocked(false);
-      setUnlockPasswordState("");
-      setError(null);
-      setStatusMessage("提示词库已解锁。");
-      return true;
-    } catch {
-      setError("密码不正确。");
-      return false;
-    }
-  }, [syncShortcuts, unlockPassword]);
+  const persistSettings = useCallback(async (nextSettings: AppSettings) => {
+    setSettings(nextSettings);
+    await saveSettings(nextSettings);
+    setStatusMessage("设置已保存。");
+  }, []);
 
   const restoreFromFileContent = useCallback(
     async (content: string) => {
       const ok = await restoreData(content);
       if (ok) {
-        setStatusMessage("提示词库恢复成功。");
+        setStatusMessage("备份恢复成功。");
         await refresh();
       } else {
         setError("恢复失败，请检查备份文件格式。");
@@ -239,15 +210,38 @@ export function usePromptLibrary() {
     [refresh],
   );
 
+  const handleBackup = useCallback(async () => {
+    const result = await backupData();
+    if (result.ok) {
+      setStatusMessage(result.message);
+      setError(null);
+    } else if (result.message !== "已取消备份。") {
+      setError(result.message);
+    }
+    return result.ok;
+  }, []);
+
+  const handleExportTxt = useCallback(async () => {
+    const result = await exportPromptsTxt();
+    if (result.ok) {
+      setStatusMessage(result.message);
+      setError(null);
+    } else if (result.message !== "已取消导出。") {
+      setError(result.message);
+    }
+    return result.ok;
+  }, []);
+
   return {
     activeCategory,
     categories,
     deletePrompt,
     error,
     filteredPrompts,
+    handleBackup,
+    handleExportTxt,
     importFromTxtContent,
     isLoading,
-    isLocked,
     persistSettings,
     prompts,
     restoreFromFileContent,
@@ -256,11 +250,9 @@ export function usePromptLibrary() {
     setError,
     setSettings,
     setStatusMessage,
-    setUnlockPassword: setUnlockPasswordState,
     settings,
     statusMessage,
     storageUsage,
-    unlock,
-    unlockPassword,
+    unavailableShortcuts,
   };
 }

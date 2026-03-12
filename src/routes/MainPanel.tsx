@@ -5,7 +5,6 @@ import { exit } from "@tauri-apps/plugin-process";
 import { Edit2, GripVertical, Minus, Plus, Settings, Trash2, X } from "lucide-react";
 import PromptModal from "../components/PromptModal";
 import SettingsModal from "../components/SettingsModal";
-import UnlockModal from "../components/UnlockModal";
 import { usePromptLibrary } from "../hooks/usePromptLibrary";
 import { CATEGORIES, getCategoryLabel, type PromptDraft, type PromptItem } from "../store";
 
@@ -30,9 +29,10 @@ export default function MainPanel() {
     deletePrompt,
     error,
     filteredPrompts,
+    handleBackup,
+    handleExportTxt,
     importFromTxtContent,
     isLoading,
-    isLocked,
     persistSettings,
     restoreFromFileContent,
     saveDraft,
@@ -41,9 +41,7 @@ export default function MainPanel() {
     settings,
     statusMessage,
     storageUsage,
-    unlock,
-    unlockPassword,
-    setUnlockPassword,
+    unavailableShortcuts,
   } = usePromptLibrary();
 
   const resetForm = () => {
@@ -59,18 +57,13 @@ export default function MainPanel() {
     await invoke("set_panel_expanded", { expanded: false });
   };
 
-  const handleUnlock = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await unlock();
-  };
-
   const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const fileContent = ev.target?.result as string;
+    reader.onload = async (event) => {
+      const fileContent = event.target?.result as string;
       if (fileContent) {
         await restoreFromFileContent(fileContent);
       }
@@ -84,8 +77,8 @@ export default function MainPanel() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const fileContent = ev.target?.result as string;
+    reader.onload = async (event) => {
+      const fileContent = event.target?.result as string;
       if (fileContent) {
         await importFromTxtContent(fileContent);
       }
@@ -158,7 +151,7 @@ export default function MainPanel() {
 
   const handleSettingsSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    await persistSettings(settings, unlockPassword);
+    await persistSettings(settings);
     setShowSettings(false);
     await invoke("set_input_mode", { enable: false });
     await invoke("set_panel_expanded", { expanded: false });
@@ -212,7 +205,7 @@ export default function MainPanel() {
       </div>
 
       <div className="relative flex h-full min-w-0 flex-1 flex-col px-2 py-2">
-        <div className="absolute top-2 right-2 z-10 flex items-center justify-end gap-2">
+        <div className="absolute right-2 top-2 z-10 flex items-center justify-end gap-2">
           <select
             value={activeCategory}
             onChange={(e) => setActiveCategory(e.target.value)}
@@ -239,7 +232,7 @@ export default function MainPanel() {
                 <button className={getButtonClass()} style={getButtonStyle()} title={prompt.content}>
                   {prompt.title}
                 </button>
-                <div className="absolute -top-2 -right-2 flex gap-1 rounded-full border border-white/10 bg-black/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                <div className="absolute -right-2 -top-2 flex gap-1 rounded-full border border-white/10 bg-black/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <button onClick={(e) => handleEdit(prompt, e)} className="p-1 hover:text-blue-400">
                     <Edit2 size={10} />
                   </button>
@@ -252,11 +245,32 @@ export default function MainPanel() {
           )}
         </div>
 
-        {(statusMessage || error) && (
-          <div className={`truncate px-1 pt-1 text-[11px] leading-none ${error ? "text-rose-300" : "text-emerald-300"}`}>
-            {error ?? statusMessage}
-          </div>
-        )}
+        <div className="flex min-h-[16px] items-center gap-3 px-1 pt-1 text-[11px] leading-none">
+          {filteredPrompts.length > 0 && (
+            <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto no-scrollbar text-white/60">
+              {filteredPrompts.map((prompt, index) => {
+                const shortcutUnavailable =
+                  Boolean(prompt.shortcut) &&
+                  unavailableShortcuts.some((item) => item.toLowerCase() === prompt.shortcut?.toLowerCase());
+
+                return (
+                  <span
+                    key={`${prompt.id}-shortcut-index`}
+                    className={`shrink-0 ${shortcutUnavailable ? "text-rose-300" : "text-white/60"}`}
+                    title={`${prompt.title}：${prompt.shortcut || "未设置"}`}
+                  >
+                    {index + 1}. {prompt.shortcut || "未设置"}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+          {(statusMessage || error) && (
+            <div className={`truncate ${error ? "text-rose-300" : "text-emerald-300"}`}>
+              {error ?? statusMessage}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="flex h-full items-center gap-2 border-l border-white/10 px-3">
@@ -325,12 +339,13 @@ export default function MainPanel() {
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
         onSave={handleSettingsSave}
+        onBackup={handleBackup}
+        onExportTxt={handleExportTxt}
         settings={settings}
         setSettings={setSettings}
         storageUsage={storageUsage}
         handleRestore={handleRestore}
         handleImportTxt={handleImportTxt}
-        setUnlockPassword={setUnlockPassword}
       />
 
       <PromptModal
@@ -349,13 +364,6 @@ export default function MainPanel() {
         setCategory={setCategory}
         shortcut={shortcut}
         setShortcut={setShortcut}
-      />
-
-      <UnlockModal
-        isOpen={isLocked}
-        unlockPassword={unlockPassword}
-        setUnlockPassword={setUnlockPassword}
-        onUnlock={handleUnlock}
       />
     </div>
   );

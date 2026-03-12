@@ -23,11 +23,7 @@ export interface AppSettings {
 export interface StorageData {
   version: number;
   timestamp: number;
-  prompts?: PromptItem[];
-  encrypted: boolean;
-  cipher?: string;
-  salt?: string;
-  iv?: string;
+  prompts: PromptItem[];
 }
 
 export const CATEGORIES = ["通用", "代码", "邮件", "个人"] as const;
@@ -39,11 +35,11 @@ const CATEGORY_LABELS: Record<string, string> = {
   Code: "代码",
   Email: "邮件",
   Personal: "个人",
-  "全部": "全部",
-  "通用": "通用",
-  "代码": "代码",
-  "邮件": "邮件",
-  "个人": "个人",
+  全部: "全部",
+  通用: "通用",
+  代码: "代码",
+  邮件: "邮件",
+  个人: "个人",
 };
 
 export function getCategoryLabel(category: string) {
