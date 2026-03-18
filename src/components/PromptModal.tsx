@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { CATEGORIES, getCategoryLabel } from '../store';
 
@@ -67,15 +67,15 @@ export default function PromptModal({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/42 px-4 py-6 backdrop-blur-sm">
             <div className="max-h-[calc(100vh-40px)] w-[90%] max-w-2xl overflow-hidden rounded-[22px] border border-slate-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,248,252,0.98))] text-slate-900 shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
                 <div className="border-b border-slate-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.95),rgba(240,244,248,0.92))] px-6 py-4">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-600/80">提示词编辑</div>
-                    <h3 className="mt-1.5 text-lg font-semibold text-slate-900">{editingId ? '编辑提示词' : '新建提示词'}</h3>
-                    <p className="mt-1 text-sm text-slate-500">尽量简洁、可复用，并便于快速触发。</p>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-sky-600/80">鎻愮ず璇嶇紪杈?/div>
+                    <h3 className="mt-1.5 text-lg font-semibold text-slate-900">{editingId ? '缂栬緫鎻愮ず璇? : '鏂板缓鎻愮ず璇?}</h3>
+                    <p className="mt-1 text-sm text-slate-500">灏介噺绠€娲併€佸彲澶嶇敤锛屽苟渚夸簬蹇€熻Е鍙戙€?/p>
                 </div>
 
                 <form onSubmit={onSave} className="max-h-[calc(100vh-150px)] space-y-4 overflow-y-auto px-6 py-5">
                     <div className="grid gap-3 md:grid-cols-[1.5fr_0.85fr]">
                         <label className="block">
-                            <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">标题</span>
+                            <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">鏍囬</span>
                             <input 
                                 id="title"
                                 required
@@ -93,7 +93,7 @@ export default function PromptModal({
                         </label>
 
                         <label className="block">
-                            <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">分类</span>
+                            <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">鍒嗙被</span>
                             <select 
                                 id="category"
                                 value={category}
@@ -114,21 +114,21 @@ export default function PromptModal({
                     <div className="rounded-[20px] border border-slate-200 bg-slate-50/90 p-4">
                         <div className="flex items-start justify-between gap-4">
                             <div>
-                                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">快捷键</div>
-                                <p className="mt-1 text-sm text-slate-500">点击输入框后，按下类似 <span className="font-medium text-slate-700">Ctrl+Shift+1</span> 的组合键。</p>
+                                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">蹇嵎閿?/div>
+                                <p className="mt-1 text-sm text-slate-500">鐐瑰嚮杈撳叆妗嗗悗锛屾寜涓嬬被浼?<span className="font-medium text-slate-700">Shift+A</span> 鐨勭粍鍚堥敭銆?/p>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setShortcut('')}
                                 className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100"
                             >
-                                清空
+                                娓呯┖
                             </button>
                         </div>
                         <input
                             id="shortcut"
                             value={shortcut}
-                            placeholder="按下快捷键"
+                            placeholder="鎸変笅蹇嵎閿?
                             readOnly
                             className="mt-4 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition-colors focus:border-sky-400 focus:ring-4 focus:ring-sky-100 select-none cursor-default"
                             onKeyDown={(e) => {
@@ -156,7 +156,7 @@ export default function PromptModal({
                     </div>
 
                     <label className="block">
-                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">内容</span>
+                        <span className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">鍐呭</span>
                         <textarea 
                             id="content"
                             required
@@ -173,11 +173,12 @@ export default function PromptModal({
                     </label>
 
                     <div className="flex gap-3 pt-1">
-                        <button type="button" onClick={handleClose} className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100">取消</button>
-                        <button type="submit" className="flex-1 rounded-2xl bg-sky-500 py-3 text-sm font-semibold text-white transition-colors hover:bg-sky-600">保存提示词</button>
+                        <button type="button" onClick={handleClose} className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100">鍙栨秷</button>
+                        <button type="submit" className="flex-1 rounded-2xl bg-sky-500 py-3 text-sm font-semibold text-white transition-colors hover:bg-sky-600">淇濆瓨鎻愮ず璇?/button>
                     </div>
                 </form>
             </div>
         </div>
     );
 }
+

@@ -11,6 +11,10 @@ interface FileActionResult {
   message: string;
 }
 
+interface PromptsUpdatedDetail {
+  sourceId?: string;
+}
+
 function normalizePrompt(raw: Partial<PromptItem>, index: number): PromptItem {
   const now = Date.now();
   const createdAt = typeof raw.createdAt === "number" ? raw.createdAt : now + index;
@@ -35,8 +39,8 @@ function normalizePrompts(rawPrompts: unknown): PromptItem[] {
     .filter((item) => item.title && item.content);
 }
 
-function emitPromptsUpdated() {
-  window.dispatchEvent(new CustomEvent(PROMPTS_UPDATED_EVENT));
+function emitPromptsUpdated(detail?: PromptsUpdatedDetail) {
+  window.dispatchEvent(new CustomEvent<PromptsUpdatedDetail>(PROMPTS_UPDATED_EVENT, { detail }));
 }
 
 export function getPromptsUpdatedEventName() {
@@ -57,11 +61,11 @@ export async function loadPrompts(): Promise<PromptItem[]> {
   }
 }
 
-export async function savePrompts(prompts: PromptItem[]) {
+export async function savePrompts(prompts: PromptItem[], sourceId?: string) {
   try {
     const estimatedSize = JSON.stringify(prompts).length;
     if (estimatedSize > 4 * 1024 * 1024) {
-      window.alert("提示：本地存储空间接近上限，已超过 4MB。");
+      window.alert("提示词数据已接近 4MB 的本地存储限制，请及时导出备份。");
     }
 
     const storageData: StorageData = {
@@ -71,11 +75,11 @@ export async function savePrompts(prompts: PromptItem[]) {
     };
 
     localStorage.setItem(STORAGE_KEY, JSON.stringify(storageData));
-    emitPromptsUpdated();
+    emitPromptsUpdated({ sourceId });
   } catch (error) {
     console.error("Failed to save prompts:", error);
     if (error instanceof DOMException && error.name === "QuotaExceededError") {
-      window.alert("本地存储空间不足，无法继续保存。");
+      window.alert("本地存储空间不足，保存失败，请删除部分内容或导出备份。");
     }
   }
 }
@@ -93,11 +97,11 @@ export async function backupData(): Promise<FileActionResult> {
     });
 
     if (!path) {
-      return { ok: false, message: "已取消备份。" };
+      return { ok: false, message: "用户已取消保存" };
     }
 
     await writeTextFile(path, raw);
-    return { ok: true, message: "备份成功，已保存为 JSON 文件。" };
+    return { ok: true, message: "备份已导出为 JSON 文件。" };
   } catch (error) {
     console.error("Backup failed:", error);
     return {
@@ -150,16 +154,16 @@ export async function exportPromptsTxt(): Promise<FileActionResult> {
     });
 
     if (!path) {
-      return { ok: false, message: "已取消导出。" };
+      return { ok: false, message: "用户已取消保存" };
     }
 
     await writeTextFile(path, exportPromptsToTxtContent(prompts));
-    return { ok: true, message: "导出成功，已生成 TXT 文件。" };
+    return { ok: true, message: "提示词已导出为 TXT 文件。" };
   } catch (error) {
     console.error("Export TXT failed:", error);
     return {
       ok: false,
-      message: `导出失败：${error instanceof Error ? error.message : String(error)}`,
+      message: `导出 TXT 失败：${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }
@@ -171,7 +175,7 @@ export async function importPromptsTxt(fileContent: string) {
       return {
         ok: false,
         importedCount: 0,
-        message: "文件中没有识别到可导入的提示词，请检查 TXT 格式。",
+        message: "未在 TXT 中解析到有效提示词，请检查格式。",
       };
     }
 
@@ -188,7 +192,7 @@ export async function importPromptsTxt(fileContent: string) {
     return {
       ok: false,
       importedCount: 0,
-      message: `导入失败：${error instanceof Error ? error.message : String(error)}`,
+      message: `导入 TXT 失败：${error instanceof Error ? error.message : String(error)}`,
     };
   }
 }

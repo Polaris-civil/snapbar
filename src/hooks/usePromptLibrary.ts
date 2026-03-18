@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   backupData,
   exportPromptsTxt,
@@ -29,6 +29,31 @@ interface ShortcutSyncResult {
   failed: string[];
 }
 
+interface PromptsUpdatedDetail {
+  sourceId?: string;
+}
+
+interface RefreshOptions {
+  showLoading?: boolean;
+  forceShortcutSync?: boolean;
+}
+
+function buildShortcutBindings(promptList: PromptItem[]): ShortcutBinding[] {
+  return promptList
+    .filter((prompt) => prompt.shortcut)
+    .map((prompt) => ({
+      shortcut: prompt.shortcut!.trim(),
+      text: prompt.content,
+    }));
+}
+
+function getShortcutSignature(promptList: PromptItem[]) {
+  return promptList
+    .filter((prompt) => prompt.shortcut)
+    .map((prompt) => `${prompt.id}:${prompt.shortcut?.trim() ?? ""}:${prompt.content}`)
+    .join("|");
+}
+
 export function usePromptLibrary() {
   const [prompts, setPrompts] = useState<PromptItem[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -38,57 +63,75 @@ export function usePromptLibrary() {
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [unavailableShortcuts, setUnavailableShortcuts] = useState<string[]>([]);
+  const eventSourceIdRef = useRef(`prompt-library-${Math.random().toString(36).slice(2)}`);
+  const lastShortcutSignatureRef = useRef<string | null>(null);
+  const lastShortcutResultRef = useRef<ShortcutSyncResult>({ registered: [], failed: [] });
 
-  const syncShortcuts = useCallback(async (promptList: PromptItem[]) => {
-    const bindings: ShortcutBinding[] = promptList
-      .filter((prompt) => prompt.shortcut)
-      .map((prompt) => ({
-        shortcut: prompt.shortcut!.trim(),
-        text: prompt.content,
-      }));
+  const syncShortcuts = useCallback(async (promptList: PromptItem[], force = false) => {
+    const signature = getShortcutSignature(promptList);
+    if (!force && signature === lastShortcutSignatureRef.current) {
+      return lastShortcutResultRef.current;
+    }
 
     try {
-      const result = await invoke<ShortcutSyncResult>("update_prompt_shortcuts", { bindings });
+      const result = await invoke<ShortcutSyncResult>("update_prompt_shortcuts", {
+        bindings: buildShortcutBindings(promptList),
+      });
+      lastShortcutSignatureRef.current = signature;
+      lastShortcutResultRef.current = result;
       setUnavailableShortcuts(result.failed);
       return result;
     } catch (syncError) {
       console.error(syncError);
+      lastShortcutSignatureRef.current = null;
+      lastShortcutResultRef.current = { registered: [], failed: [] };
       setUnavailableShortcuts([]);
-      setError("快捷键同步失败，请检查桌面端权限。");
+      setError("快捷键同步失败，请稍后重试。");
       return { registered: [], failed: [] };
     }
   }, []);
 
-  const refresh = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const refresh = useCallback(
+    async ({ showLoading = true, forceShortcutSync = false }: RefreshOptions = {}) => {
+      if (showLoading) {
+        setIsLoading(true);
+      }
+      setError(null);
 
-    try {
-      const [loadedPrompts, loadedSettings] = await Promise.all([loadPrompts(), loadSettings()]);
-      await syncShortcuts(loadedPrompts);
-      startTransition(() => {
-        setPrompts(loadedPrompts);
-        setSettings(loadedSettings);
-        setStorageUsage(getStorageUsage());
-      });
-    } catch (loadError) {
-      console.error(loadError);
-      setError("提示词库加载失败。");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [syncShortcuts]);
+      try {
+        const [loadedPrompts, loadedSettings] = await Promise.all([loadPrompts(), loadSettings()]);
+        await syncShortcuts(loadedPrompts, forceShortcutSync);
+        startTransition(() => {
+          setPrompts(loadedPrompts);
+          setSettings(loadedSettings);
+          setStorageUsage(getStorageUsage());
+        });
+      } catch (loadError) {
+        console.error(loadError);
+        setError("加载提示词失败，请稍后重试。");
+      } finally {
+        if (showLoading) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [syncShortcuts],
+  );
 
   useEffect(() => {
-    void refresh();
+    void refresh({ forceShortcutSync: true });
 
-    const handleUpdate = () => {
-      void refresh();
+    const handleUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<PromptsUpdatedDetail>).detail;
+      if (detail?.sourceId === eventSourceIdRef.current) {
+        return;
+      }
+      void refresh({ showLoading: false });
     };
 
     const handleStorage = (event: StorageEvent) => {
       if (event.key === "app_prompts_data" || event.key === null) {
-        void refresh();
+        void refresh({ showLoading: false });
       }
     };
 
@@ -148,16 +191,16 @@ export function usePromptLibrary() {
           ];
 
       setPrompts(nextPrompts);
-      await savePrompts(nextPrompts);
+      await savePrompts(nextPrompts, eventSourceIdRef.current);
       const result = await syncShortcuts(nextPrompts);
       setStorageUsage(getStorageUsage());
       setError(null);
       setStatusMessage(
         result.failed.length > 0
-          ? "部分快捷键未能注册，请查看对应按钮下方的快捷键索引。"
+          ? "提示词已保存，但部分快捷键注册失败。"
           : editingId
             ? "提示词已更新。"
-            : "提示词已创建。",
+            : "提示词已新增。",
       );
       return true;
     },
@@ -168,7 +211,7 @@ export function usePromptLibrary() {
     async (id: string) => {
       const nextPrompts = prompts.filter((prompt) => prompt.id !== id);
       setPrompts(nextPrompts);
-      await savePrompts(nextPrompts);
+      await savePrompts(nextPrompts, eventSourceIdRef.current);
       await syncShortcuts(nextPrompts);
       setStorageUsage(getStorageUsage());
       setStatusMessage("提示词已删除。");
@@ -186,10 +229,10 @@ export function usePromptLibrary() {
     async (content: string) => {
       const ok = await restoreData(content);
       if (ok) {
-        setStatusMessage("备份恢复成功。");
-        await refresh();
+        setStatusMessage("备份已恢复。");
+        await refresh({ forceShortcutSync: true });
       } else {
-        setError("恢复失败，请检查备份文件格式。");
+        setError("恢复备份失败，请检查文件内容。");
       }
       return ok;
     },
@@ -201,7 +244,7 @@ export function usePromptLibrary() {
       const result = await importPromptsTxt(content);
       if (result.ok) {
         setStatusMessage(result.message);
-        await refresh();
+        await refresh({ forceShortcutSync: true });
       } else {
         setError(result.message);
       }
@@ -215,7 +258,7 @@ export function usePromptLibrary() {
     if (result.ok) {
       setStatusMessage(result.message);
       setError(null);
-    } else if (result.message !== "已取消备份。") {
+    } else if (result.message !== "用户已取消保存") {
       setError(result.message);
     }
     return result.ok;
@@ -226,7 +269,7 @@ export function usePromptLibrary() {
     if (result.ok) {
       setStatusMessage(result.message);
       setError(null);
-    } else if (result.message !== "已取消导出。") {
+    } else if (result.message !== "用户已取消保存") {
       setError(result.message);
     }
     return result.ok;
