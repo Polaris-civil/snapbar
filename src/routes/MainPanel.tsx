@@ -6,11 +6,15 @@ import { Edit2, GripVertical, Minus, Plus, Settings, Trash2, X } from "lucide-re
 import PromptModal from "../components/PromptModal";
 import SettingsModal from "../components/SettingsModal";
 import { usePromptLibrary } from "../hooks/usePromptLibrary";
-import { CATEGORIES, getCategoryLabel, type PromptDraft, type PromptItem } from "../store";
+import { ALL_CATEGORIES_FILTER, DEFAULT_CATEGORY, getCategoryLabel, type PromptDraft, type PromptItem } from "../store";
 
 interface DeleteDialogState {
   id: string;
   title: string;
+}
+
+function getDefaultCategory(categories: string[]) {
+  return categories.find((item) => item !== ALL_CATEGORIES_FILTER && item.trim()) ?? DEFAULT_CATEGORY;
 }
 
 interface PromptTileProps {
@@ -53,7 +57,7 @@ export default function MainPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [category, setCategory] = useState<string>(CATEGORIES[0]);
+  const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
   const [shortcut, setShortcut] = useState("");
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
 
@@ -84,9 +88,9 @@ export default function MainPanel() {
     setEditingId(null);
     setTitle("");
     setContent("");
-    setCategory(CATEGORIES[0]);
+    setCategory(getDefaultCategory(categories));
     setShortcut("");
-  }, []);
+  }, [categories]);
 
   const collapsePanelIfIdle = useCallback(async () => {
     if (showModal || showSettings) return;
@@ -169,7 +173,8 @@ export default function MainPanel() {
   const handleSave = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      const draft: PromptDraft = { title, content, category, shortcut };
+      const normalizedCategory = category.trim() || getDefaultCategory(categories);
+      const draft: PromptDraft = { title, content, category: normalizedCategory, shortcut };
       const saved = await saveDraft(draft, editingId);
       if (!saved) return;
 
@@ -178,7 +183,7 @@ export default function MainPanel() {
       await invoke("set_panel_expanded", { expanded: false });
       resetForm();
     },
-    [category, content, editingId, resetForm, saveDraft, shortcut, title],
+    [categories, category, content, editingId, resetForm, saveDraft, shortcut, title],
   );
 
   const openSettings = useCallback(async () => {
@@ -407,6 +412,7 @@ export default function MainPanel() {
         setContent={setContent}
         category={category}
         setCategory={setCategory}
+        categories={categories.filter((item) => item !== ALL_CATEGORIES_FILTER)}
         shortcut={shortcut}
         setShortcut={setShortcut}
       />

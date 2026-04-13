@@ -13,6 +13,7 @@ import {
 import { loadSettings, saveSettings } from "../lib/settingsStorage";
 import {
   ALL_CATEGORIES_FILTER,
+  DEFAULT_CATEGORY,
   DEFAULT_SETTINGS,
   type AppSettings,
   type PromptDraft,
@@ -160,6 +161,7 @@ export function usePromptLibrary() {
 
   const saveDraft = useCallback(
     async (draft: PromptDraft, editingId: string | null) => {
+      const normalizedCategory = draft.category.trim() || DEFAULT_CATEGORY;
       const normalizedShortcut = draft.shortcut?.trim() || undefined;
       const conflictingPrompt = prompts.find(
         (prompt) =>
@@ -176,7 +178,7 @@ export function usePromptLibrary() {
       const nextPrompts = editingId
         ? prompts.map((prompt) =>
             prompt.id === editingId
-              ? { ...prompt, ...draft, shortcut: normalizedShortcut, updatedAt: now }
+              ? { ...prompt, ...draft, category: normalizedCategory, shortcut: normalizedShortcut, updatedAt: now }
               : prompt,
           )
         : [
@@ -184,6 +186,7 @@ export function usePromptLibrary() {
             {
               id: now.toString(),
               ...draft,
+              category: normalizedCategory,
               shortcut: normalizedShortcut,
               createdAt: now,
               updatedAt: now,

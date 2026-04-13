@@ -27,6 +27,7 @@ export interface StorageData {
   prompts: PromptItem[];
 }
 
+export const DEFAULT_CATEGORY = "通用";
 export const CATEGORIES = ["\u901a\u7528", "\u4ee3\u7801", "\u90ae\u4ef6", "\u4e2a\u4eba"] as const;
 export const ALL_CATEGORIES_FILTER = "\u5168\u90e8";
 
