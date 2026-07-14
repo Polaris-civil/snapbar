@@ -1,12 +1,21 @@
 ﻿import React, { memo, useCallback, useDeferredValue, useMemo, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
 import { Edit2, GripVertical, Minus, Plus, Settings, Trash2, X } from "lucide-react";
 import PromptModal from "../components/PromptModal";
 import SettingsModal from "../components/SettingsModal";
 import { usePromptLibrary } from "../hooks/usePromptLibrary";
-import { ALL_CATEGORIES_FILTER, DEFAULT_CATEGORY, getCategoryLabel, type PromptDraft, type PromptItem } from "../store";
+import { canonicalizeShortcut } from "../lib/shortcut";
+import {
+  ALL_CATEGORIES_FILTER,
+  DEFAULT_CATEGORY,
+  getCategoryLabel,
+  type AppSettings,
+  type PromptDraft,
+  type PromptItem,
+} from "../store";
 
 interface DeleteDialogState {
   id: string;
@@ -60,9 +69,11 @@ export default function MainPanel() {
   const [category, setCategory] = useState<string>(DEFAULT_CATEGORY);
   const [shortcut, setShortcut] = useState("");
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
+  const [settingsDraft, setSettingsDraft] = useState<AppSettings | null>(null);
 
   const {
     activeCategory,
+    canUndoRestore,
     categories,
     deletePrompt,
     error,
@@ -75,10 +86,12 @@ export default function MainPanel() {
     restoreFromFileContent,
     saveDraft,
     setActiveCategory,
-    setSettings,
+    setError,
     settings,
     statusMessage,
     storageUsage,
+    typePromptText,
+    undoRestore,
     unavailableShortcuts,
   } = usePromptLibrary();
 
@@ -92,52 +105,90 @@ export default function MainPanel() {
     setShortcut("");
   }, [categories]);
 
+  const reportCommandError = useCallback(
+    (commandError: unknown, fallback: string) => {
+      if (typeof commandError === "string" && commandError.trim()) setError(commandError);
+      else if (commandError instanceof Error && commandError.message) setError(commandError.message);
+      else setError(fallback);
+    },
+    [setError],
+  );
+
+  const resizePanel = useCallback(
+    async (expanded: boolean) => {
+      try {
+        await invoke("set_panel_expanded", { expanded });
+        return true;
+      } catch (resizeError) {
+        reportCommandError(resizeError, "调整窗口大小失败。");
+        return false;
+      }
+    },
+    [reportCommandError],
+  );
+
   const collapsePanelIfIdle = useCallback(async () => {
     if (showModal || showSettings) return;
-    await invoke("set_panel_expanded", { expanded: false });
-  }, [showModal, showSettings]);
-
-  const readSelectedFile = useCallback(async (file: File) => {
-    return await file.text();
-  }, []);
+    await resizePanel(false);
+  }, [resizePanel, showModal, showSettings]);
 
   const handleRestore = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
+      const input = event.currentTarget;
+      const file = input.files?.[0];
       if (!file) return;
-
-      const fileContent = await readSelectedFile(file);
-      if (fileContent) {
-        await restoreFromFileContent(fileContent);
+      try {
+        const approved = await confirmDialog("恢复备份会替换当前提示词及备份中包含的设置。系统会保留一次可撤销快照。", {
+          title: "恢复 SnapBar 备份",
+          kind: "warning",
+        });
+        if (!approved) return;
+        const fileContent = await file.text();
+        if (!fileContent.trim()) throw new Error("所选备份文件为空。");
+        const restored = await restoreFromFileContent(fileContent);
+        if (restored) setSettingsDraft(null);
+      } catch (restoreError) {
+        reportCommandError(restoreError, "读取或恢复备份失败。");
+      } finally {
+        input.value = "";
       }
-      event.target.value = "";
     },
-    [readSelectedFile, restoreFromFileContent],
+    [reportCommandError, restoreFromFileContent],
   );
 
   const handleImportTxt = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
+      const input = event.currentTarget;
+      const file = input.files?.[0];
       if (!file) return;
-
-      const fileContent = await readSelectedFile(file);
-      if (fileContent) {
+      try {
+        const fileContent = await file.text();
+        if (!fileContent.trim()) throw new Error("所选 TXT 文件为空。");
         await importFromTxtContent(fileContent);
+      } catch (importError) {
+        reportCommandError(importError, "读取或导入 TXT 失败。");
+      } finally {
+        input.value = "";
       }
-      event.target.value = "";
     },
-    [importFromTxtContent, readSelectedFile],
+    [importFromTxtContent, reportCommandError],
   );
 
-  const handlePaste = useCallback(async (text: string, _event: React.MouseEvent) => {
-    await invoke("type_text", { text });
-  }, []);
+  const handlePaste = useCallback(
+    async (text: string, _event: React.MouseEvent) => {
+      await typePromptText(text);
+    },
+    [typePromptText],
+  );
 
-  const handleDeleteRequest = useCallback(async (item: PromptItem, event: React.MouseEvent) => {
-    event.stopPropagation();
-    await invoke("set_panel_expanded", { expanded: true });
-    setDeleteDialog({ id: item.id, title: item.title });
-  }, []);
+  const handleDeleteRequest = useCallback(
+    async (item: PromptItem, event: React.MouseEvent) => {
+      event.stopPropagation();
+      await resizePanel(true);
+      setDeleteDialog({ id: item.id, title: item.title });
+    },
+    [resizePanel],
+  );
 
   const handleDeleteCancel = useCallback(async () => {
     setDeleteDialog(null);
@@ -146,29 +197,37 @@ export default function MainPanel() {
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteDialog) return;
-    await deletePrompt(deleteDialog.id);
+    const deleted = await deletePrompt(deleteDialog.id);
+    if (!deleted) return;
     setDeleteDialog(null);
     await collapsePanelIfIdle();
   }, [collapsePanelIfIdle, deleteDialog, deletePrompt]);
 
-  const handleEdit = useCallback(async (item: PromptItem, event: React.MouseEvent) => {
-    event.stopPropagation();
-    setEditingId(item.id);
-    setTitle(item.title);
-    setContent(item.content);
-    setCategory(item.category);
-    setShortcut(item.shortcut ?? "");
-    await invoke("set_panel_expanded", { expanded: true });
-    await invoke("set_input_mode", { enable: true });
-    setShowModal(true);
-  }, []);
+  const handleEdit = useCallback(
+    async (item: PromptItem, event: React.MouseEvent) => {
+      event.stopPropagation();
+      setEditingId(item.id);
+      setTitle(item.title);
+      setContent(item.content);
+      setCategory(item.category);
+      setShortcut(item.shortcut ?? "");
+      await resizePanel(true);
+      setShowModal(true);
+    },
+    [resizePanel],
+  );
 
   const openAddModal = useCallback(async () => {
     resetForm();
-    await invoke("set_panel_expanded", { expanded: true });
-    await invoke("set_input_mode", { enable: true });
+    await resizePanel(true);
     setShowModal(true);
-  }, [resetForm]);
+  }, [resetForm, resizePanel]);
+
+  const closePromptModal = useCallback(async () => {
+    setShowModal(false);
+    resetForm();
+    await resizePanel(false);
+  }, [resetForm, resizePanel]);
 
   const handleSave = useCallback(
     async (event: React.FormEvent) => {
@@ -179,29 +238,66 @@ export default function MainPanel() {
       if (!saved) return;
 
       setShowModal(false);
-      await invoke("set_input_mode", { enable: false });
-      await invoke("set_panel_expanded", { expanded: false });
       resetForm();
+      await resizePanel(false);
     },
-    [categories, category, content, editingId, resetForm, saveDraft, shortcut, title],
+    [categories, category, content, editingId, resetForm, resizePanel, saveDraft, shortcut, title],
   );
 
   const openSettings = useCallback(async () => {
-    await invoke("set_panel_expanded", { expanded: true });
-    await invoke("set_input_mode", { enable: true });
+    setSettingsDraft({ ...settings });
+    await resizePanel(true);
     setShowSettings(true);
-  }, []);
+  }, [resizePanel, settings]);
+
+  const closeSettings = useCallback(async () => {
+    setShowSettings(false);
+    setSettingsDraft(null);
+    await resizePanel(false);
+  }, [resizePanel]);
 
   const handleSettingsSave = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      await persistSettings(settings);
+      if (!settingsDraft) return;
+      const saved = await persistSettings(settingsDraft);
+      if (!saved) return;
       setShowSettings(false);
-      await invoke("set_input_mode", { enable: false });
-      await invoke("set_panel_expanded", { expanded: false });
+      setSettingsDraft(null);
+      await resizePanel(false);
     },
-    [persistSettings, settings],
+    [persistSettings, resizePanel, settingsDraft],
   );
+
+  const handleUndoRestore = useCallback(async () => {
+    const restored = await undoRestore();
+    if (restored) setSettingsDraft(null);
+    return restored;
+  }, [undoRestore]);
+
+  const startDragging = useCallback(async () => {
+    try {
+      await getCurrentWindow().startDragging();
+    } catch (dragError) {
+      reportCommandError(dragError, "拖动窗口失败。");
+    }
+  }, [reportCommandError]);
+
+  const minimizeWindow = useCallback(async () => {
+    try {
+      await invoke("minimize_main");
+    } catch (minimizeError) {
+      reportCommandError(minimizeError, "最小化窗口失败。");
+    }
+  }, [reportCommandError]);
+
+  const exitApp = useCallback(async () => {
+    try {
+      await exit(0);
+    } catch (exitError) {
+      reportCommandError(exitError, "退出 SnapBar 失败。");
+    }
+  }, [reportCommandError]);
 
   const buttonClassName = useMemo(() => {
     const base =
@@ -249,7 +345,7 @@ export default function MainPanel() {
     >
       <div
         className="flex h-full w-8 cursor-move items-center justify-center transition-colors hover:bg-white/10"
-        onMouseDown={() => getCurrentWindow().startDragging()}
+        onMouseDown={() => void startDragging()}
       >
         <GripVertical size={16} className="text-white/50" />
       </div>
@@ -293,7 +389,8 @@ export default function MainPanel() {
               <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto no-scrollbar text-white/60">
                 {deferredPrompts.map((prompt, index) => {
                   const shortcutUnavailable =
-                    Boolean(prompt.shortcut) && unavailableShortcutSet.has(prompt.shortcut!.toLowerCase());
+                    Boolean(prompt.shortcut) &&
+                    unavailableShortcutSet.has(canonicalizeShortcut(prompt.shortcut).toLowerCase());
 
                   return (
                     <span
@@ -339,14 +436,14 @@ export default function MainPanel() {
         </button>
         <div className="flex flex-col gap-1">
           <button
-            onClick={() => invoke("minimize_main")}
+            onClick={() => void minimizeWindow()}
             className="rounded-lg p-2 text-white/55 transition-colors hover:bg-white/10 hover:text-white"
             title={"\u6700\u5c0f\u5316"}
           >
             <Minus size={18} />
           </button>
           <button
-            onClick={() => exit(0)}
+            onClick={() => void exitApp()}
             className="rounded-lg p-2 text-white/50 transition-colors hover:bg-red-500/20 hover:text-red-400"
             title={"\u9000\u51fa"}
           >
@@ -387,12 +484,14 @@ export default function MainPanel() {
 
       <SettingsModal
         isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
+        onClose={() => void closeSettings()}
         onSave={handleSettingsSave}
         onBackup={handleBackup}
         onExportTxt={handleExportTxt}
-        settings={settings}
-        setSettings={setSettings}
+        onUndoRestore={handleUndoRestore}
+        canUndoRestore={canUndoRestore}
+        settings={settingsDraft ?? settings}
+        setSettings={setSettingsDraft}
         storageUsage={storageUsage}
         handleRestore={handleRestore}
         handleImportTxt={handleImportTxt}
@@ -400,10 +499,7 @@ export default function MainPanel() {
 
       <PromptModal
         isOpen={showModal}
-        onClose={() => {
-          setShowModal(false);
-          resetForm();
-        }}
+        onClose={() => void closePromptModal()}
         onSave={handleSave}
         editingId={editingId}
         title={title}

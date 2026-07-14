@@ -1,7 +1,7 @@
 ﻿import React, { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { AppSettings } from "../store";
+import { isValidThemeColor } from "../lib/settingsStorage";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -9,6 +9,8 @@ interface SettingsModalProps {
   onSave: (e: React.FormEvent) => void;
   onBackup: () => Promise<boolean>;
   onExportTxt: () => Promise<boolean>;
+  onUndoRestore: () => Promise<boolean>;
+  canUndoRestore: boolean;
   settings: AppSettings;
   setSettings: (settings: AppSettings) => void;
   storageUsage: string;
@@ -35,6 +37,8 @@ export default function SettingsModal({
   onSave,
   onBackup,
   onExportTxt,
+  onUndoRestore,
+  canUndoRestore,
   settings,
   setSettings,
   storageUsage,
@@ -58,12 +62,6 @@ export default function SettingsModal({
     fontSize: `${Math.max(10, 14 * previewScale)}px`,
     padding: `${Math.max(6, 8 * previewScale)}px ${Math.max(12, 16 * previewScale)}px`,
     minWidth: `${Math.max(92, 120 * previewScale)}px`,
-  };
-
-  const handleClose = async () => {
-    onClose();
-    await invoke("set_input_mode", { enable: false });
-    await invoke("set_panel_expanded", { expanded: false });
   };
 
   return (
@@ -171,7 +169,11 @@ export default function SettingsModal({
                     onChange={(e) => setSettings({ ...settings, themeColor: e.target.value })}
                     className="w-full cursor-text rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-mono text-slate-900 outline-none transition-colors focus:border-sky-400 focus:ring-4 focus:ring-sky-100"
                     onKeyDown={(e) => e.stopPropagation()}
+                    aria-invalid={!isValidThemeColor(settings.themeColor)}
                   />
+                  {!isValidThemeColor(settings.themeColor) && (
+                    <p className="mt-2 text-xs text-rose-600">{"请输入有效的 Hex 颜色，例如 #0f172a88。"}</p>
+                  )}
                 </div>
               </div>
             </section>
@@ -181,6 +183,10 @@ export default function SettingsModal({
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">{"\u5df2\u4f7f\u7528\u7a7a\u95f4"}</div>
                 <div className="mt-1 text-lg font-semibold text-slate-800">{storageUsage}</div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs leading-5 text-sky-900">
+                {"提示词和设置以明文保存在本机。请勿把登录密码、私钥或长期有效的访问令牌保存在 SnapBar 中。"}
               </div>
 
               <div className="mt-4 grid gap-2 sm:grid-cols-2">
@@ -214,6 +220,15 @@ export default function SettingsModal({
                   {"\u5bfc\u5165 TXT"}
                   <input type="file" accept=".txt,text/plain" className="hidden" onChange={handleImportTxt} />
                 </label>
+                <button
+                  type="button"
+                  disabled={!canUndoRestore}
+                  onClick={() => void onUndoRestore()}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45"
+                  title={"撤销最近一次 JSON 备份恢复"}
+                >
+                  {"撤销上次恢复"}
+                </button>
               </div>
 
               <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
@@ -244,7 +259,7 @@ export default function SettingsModal({
           <div className="flex gap-3 pt-1">
             <button
               type="button"
-              onClick={() => void handleClose()}
+              onClick={onClose}
               className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
             >
               {"\u53d6\u6d88"}

@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MainPanel from "./MainPanel";
 
 const libraryState = {
   activeCategory: "全部",
+  canUndoRestore: false,
   categories: ["全部", "通用", "代码"],
   deletePrompt: vi.fn(),
   error: null as string | null,
@@ -27,10 +27,13 @@ const libraryState = {
   settings: {
     buttonSize: 100,
     themeColor: "#00000080",
+    showShortcutHints: true,
   },
   statusMessage: null as string | null,
   storageUsage: "10 KB",
   unavailableShortcuts: [],
+  typePromptText: vi.fn().mockResolvedValue(true),
+  undoRestore: vi.fn().mockResolvedValue(true),
 };
 
 vi.mock("../hooks/usePromptLibrary", () => ({
@@ -47,9 +50,14 @@ describe("MainPanel", () => {
       { id: "2", title: "查询 SQL", content: "SELECT * FROM prompts;", category: "代码", createdAt: 3, updatedAt: 4 },
     ];
     libraryState.error = null;
+    libraryState.canUndoRestore = false;
     libraryState.statusMessage = null;
     libraryState.saveDraft = vi.fn().mockResolvedValue(true);
-    libraryState.deletePrompt = vi.fn();
+    libraryState.deletePrompt = vi.fn().mockResolvedValue(true);
+    libraryState.persistSettings = vi.fn().mockResolvedValue(true);
+    libraryState.typePromptText = vi.fn().mockResolvedValue(true);
+    libraryState.restoreFromFileContent = vi.fn().mockResolvedValue(true);
+    libraryState.undoRestore = vi.fn().mockResolvedValue(true);
   });
 
   it("renders prompt list correctly", async () => {
@@ -61,13 +69,13 @@ describe("MainPanel", () => {
     });
   });
 
-  it("calls invoke type_text on item click", async () => {
+  it("delegates prompt input and reports through the library hook", async () => {
     render(<MainPanel />);
     await waitFor(() => screen.getByText("欢迎语"));
 
     fireEvent.click(screen.getByText("欢迎语"));
 
-    expect(invoke).toHaveBeenCalledWith("type_text", { text: "Hello World" });
+    expect(libraryState.typePromptText).toHaveBeenCalledWith("Hello World");
   });
 
   it("opens the delete dialog and confirms deletion", async () => {
@@ -81,5 +89,40 @@ describe("MainPanel", () => {
     await waitFor(() => {
       expect(libraryState.deletePrompt).toHaveBeenCalledWith("1");
     });
+  });
+
+  it("discards settings draft changes when the modal is cancelled", async () => {
+    render(<MainPanel />);
+    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(await screen.findByTitle("青绿色"));
+    fireEvent.click(screen.getByText("取消"));
+
+    fireEvent.click(screen.getByTitle("设置"));
+    expect(await screen.findByDisplayValue("#00000080")).toBeInTheDocument();
+    expect(libraryState.persistSettings).not.toHaveBeenCalled();
+  });
+
+  it("drops stale settings drafts after restoring a backup", async () => {
+    render(<MainPanel />);
+    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(await screen.findByTitle("青绿色"));
+
+    const restoreInput = document.querySelector<HTMLInputElement>('input[type="file"][accept*="json"]')!;
+    const file = { text: vi.fn().mockResolvedValue('{"version":2,"prompts":[]}') };
+    fireEvent.change(restoreInput, { target: { files: [file] } });
+
+    await waitFor(() => expect(libraryState.restoreFromFileContent).toHaveBeenCalled());
+    expect(await screen.findByDisplayValue("#00000080")).toBeInTheDocument();
+  });
+
+  it("drops stale settings drafts after undoing a restore", async () => {
+    libraryState.canUndoRestore = true;
+    render(<MainPanel />);
+    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(await screen.findByTitle("青绿色"));
+    fireEvent.click(screen.getByText("撤销上次恢复"));
+
+    await waitFor(() => expect(libraryState.undoRestore).toHaveBeenCalled());
+    expect(await screen.findByDisplayValue("#00000080")).toBeInTheDocument();
   });
 });

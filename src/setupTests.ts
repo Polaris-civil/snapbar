@@ -6,6 +6,10 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }));
 
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn().mockResolvedValue(vi.fn()),
+}));
+
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     hide: vi.fn(),
@@ -17,10 +21,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 }));
 
 vi.mock('@tauri-apps/plugin-fs', () => ({
-    readTextFile: vi.fn(),
-    writeTextFile: vi.fn(),
-    exists: vi.fn().mockResolvedValue(true),
-    BaseDirectory: { AppConfig: 'AppConfig' },
+  writeTextFile: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/plugin-process', () => ({

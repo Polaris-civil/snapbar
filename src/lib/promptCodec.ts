@@ -1,16 +1,20 @@
 import type { PromptItem } from "./promptTypes";
+import { canonicalizeShortcut } from "./shortcut";
 
 const BLOCK_SEPARATOR = /\n\s*---+\s*\n/g;
+const FORMAT_HEADER_V2 = "格式: SnapBar-TXT-v2";
+const FORMAT_HEADER = "格式: SnapBar-TXT-v3";
 
 function createPrompt(
   title: string,
   content: string,
   category = "通用",
   shortcut?: string,
+  preserveContentWhitespace = false,
 ): PromptItem | null {
   const normalizedTitle = title.trim();
-  const normalizedContent = content.trim();
-  if (!normalizedTitle || !normalizedContent) return null;
+  if (!normalizedTitle || !content.trim()) return null;
+  const normalizedContent = preserveContentWhitespace ? content : content.trim();
 
   const now = Date.now();
   return {
@@ -18,35 +22,42 @@ function createPrompt(
     title: normalizedTitle,
     content: normalizedContent,
     category: category.trim() || "通用",
-    shortcut: shortcut?.trim() || undefined,
+    shortcut: canonicalizeShortcut(shortcut) || undefined,
     createdAt: now,
     updatedAt: now,
   };
 }
 
 function parseStructuredBlocks(text: string): PromptItem[] {
-  const blocks = text
-    .replace(/\r\n/g, "\n")
-    .trim()
-    .split(BLOCK_SEPARATOR)
-    .map((block) => block.trim())
-    .filter(Boolean);
+  const normalizedText = text.replace(/\r\n/g, "\n");
+  const isVersionThree = normalizedText.includes(FORMAT_HEADER);
+  const blocks = (isVersionThree
+    ? normalizedText.split("\n---\n")
+    : normalizedText.trim().split(BLOCK_SEPARATOR).map((block) => block.trim())
+  ).filter((block) => block.trim());
 
   return blocks
     .map((block) => {
       const lines = block.split("\n");
+      const isEscapedFormat = lines.some(
+        (line) => line.trim() === FORMAT_HEADER_V2 || line.trim() === FORMAT_HEADER,
+      );
+      const preserveContentWhitespace = lines.some((line) => line.trim() === FORMAT_HEADER);
       let title = "";
       let category = "通用";
       let shortcut = "";
-      let content = "";
+      const contentLines: string[] = [];
       let readingContent = false;
 
       for (const rawLine of lines) {
         const line = rawLine.trimEnd();
+        if (line.trim() === FORMAT_HEADER_V2 || line.trim() === FORMAT_HEADER) continue;
+        if (readingContent) {
+          const contentLine = isEscapedFormat && rawLine.startsWith("\\") ? rawLine.slice(1) : rawLine;
+          contentLines.push(contentLine);
+          continue;
+        }
         if (!line.trim()) {
-          if (readingContent) {
-            content += `${content ? "\n" : ""}`;
-          }
           continue;
         }
 
@@ -75,18 +86,21 @@ function parseStructuredBlocks(text: string): PromptItem[] {
           }
 
           if (key === "内容" || key === "content") {
-            content = value;
+            if (value) contentLines.push(value);
             readingContent = true;
             continue;
           }
         }
 
-        if (readingContent) {
-          content += `${content ? "\n" : ""}${line}`;
-        }
       }
 
-      return createPrompt(title, content, category, shortcut);
+      return createPrompt(
+        title,
+        contentLines.join("\n"),
+        category,
+        shortcut,
+        preserveContentWhitespace,
+      );
     })
     .filter((item): item is PromptItem => Boolean(item));
 }
@@ -116,14 +130,19 @@ export function parseTxtPrompts(text: string): PromptItem[] {
 
 export function exportPromptsToTxtContent(prompts: PromptItem[]) {
   return prompts
-    .map((prompt) =>
-      [
+    .map((prompt) => {
+      const escapedContent = prompt.content
+        .split("\n")
+        .map((line) => (line.startsWith("\\") || /^\s*---+\s*$/.test(line) ? `\\${line}` : line))
+        .join("\n");
+      return [
+        FORMAT_HEADER,
         `标题: ${prompt.title}`,
         `分类: ${prompt.category || "通用"}`,
-        `快捷键: ${prompt.shortcut ?? ""}`,
+        `快捷键: ${canonicalizeShortcut(prompt.shortcut)}`,
         "内容:",
-        prompt.content,
-      ].join("\n"),
-    )
-    .join("\n\n---\n\n");
+        escapedContent,
+      ].join("\n");
+    })
+    .join("\n---\n");
 }

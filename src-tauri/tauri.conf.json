@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' customprotocol: asset:; connect-src 'self' ipc: http://ipc.localhost http://localhost:* ws://localhost:*; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'"
     }
   },
   "bundle": {
@@ -32,7 +32,7 @@
     "targets": "all",
     "windows": {
       "wix": {
-        "template": "wix-template.wxs"
+        "upgradeCode": "8a0aba4e-2df8-5185-b7dd-78c2f636ced9"
       }
     },
     "icon": [
@@ -44,4 +44,3 @@
     ]
   }
 }
-

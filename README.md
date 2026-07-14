@@ -2,7 +2,7 @@
 
 ![SnapBar Logo](src-tauri/icons/app-icon.svg)
 
-SnapBar 是一个基于 `Tauri + React + TypeScript` 构建的 Windows 桌面效率工具，用来管理和快速输入常用提示词、模板文本、代码片段和固定回复。
+SnapBar 是一个基于 `Tauri + React + TypeScript` 构建的 Windows / macOS 桌面效率工具，用来管理和快速输入常用提示词、模板文本、代码片段和固定回复。
 
 它的核心思路不是“复制后自己粘贴”，而是点击按钮或触发快捷键后，自动把内容输入到你刚刚正在使用的应用里，尽量减少在不同窗口之间来回切换的打断感。
 
@@ -33,11 +33,11 @@ SnapBar 是一个基于 `Tauri + React + TypeScript` 构建的 Windows 桌面效
 
 ## 运行环境
 
-- Windows 10 / 11
-- Node.js 18+
+- Windows 10 / 11，或 macOS（本次已在 macOS 14.8.4 arm64 验证；Intel Mac 和更早系统版本尚未实机验证）
+- Node.js 20.19+
 - Rust stable
 
-说明：当前实现更偏向 Windows 桌面环境，核心输入和窗口控制能力依赖 Windows 原生行为。
+说明：核心输入和窗口恢复分别使用 Win32 与 macOS AppKit 实现。macOS 首次输入时会请求“辅助功能”权限；拒绝授权时，SnapBar 会保留数据并显示错误，不会静默输入到其他窗口。
 
 ## 本地开发
 
@@ -52,6 +52,14 @@ npm install
 ```bash
 npm run tauri dev
 ```
+
+macOS 首次使用自动输入：
+
+1. 在目标应用中点击输入框，再点击 SnapBar 的提示词。
+2. 按系统提示前往“系统设置 → 隐私与安全性 → 辅助功能”。
+3. 允许当前 SnapBar 开发程序或已安装的 SnapBar，再重新触发输入。
+
+全局快捷键至少要包含 `Ctrl`、`Alt`、`Command` 或 `CmdOrCtrl` 中的一项；不会注册可能占用正常输入的裸字母、`Shift+A`、`Delete` 等组合。
 
 如果你在 PowerShell 下遇到脚本执行策略问题，可以改用：
 
@@ -72,6 +80,13 @@ npm run tauri build
 
 - `src-tauri/target/release/bundle/nsis/`
 - `src-tauri/target/release/bundle/msi/`
+
+macOS 构建产物通常位于：
+
+- `src-tauri/target/release/bundle/macos/`
+- `src-tauri/target/release/bundle/dmg/`
+
+当前仓库不包含签名、公证或自动更新配置。对外分发 macOS 安装包前，需要配置 Apple Developer 签名和 notarization。
 
 ## 项目结构
 
@@ -99,8 +114,9 @@ src-tauri/
 
 ## 数据说明
 
-- 提示词和设置默认保存在本地
+- 提示词和设置以明文保存在本地，请勿保存登录密码、私钥或长期有效的访问令牌
 - 可导出为 JSON 备份，也可导出为 TXT 进行分享或迁移
+- JSON 恢复会先校验文件并保存一次可撤销快照；可在设置中撤销最近一次恢复
 
 ### JSON 备份格式
 
@@ -122,7 +138,12 @@ src-tauri/
       "createdAt": 1741737600000,
       "updatedAt": 1741737600000
     }
-  ]
+  ],
+  "settings": {
+    "buttonSize": 100,
+    "themeColor": "#00000080",
+    "showShortcutHints": true
+  }
 }
 ```
 
@@ -131,6 +152,7 @@ src-tauri/
 - `version`：备份格式版本
 - `timestamp`：备份生成时间戳
 - `prompts`：提示词数组
+- `settings`：可选设置对象；旧备份不包含该字段时，恢复会保留当前设置
 
 ### TXT 导出格式
 
@@ -158,6 +180,7 @@ console.log("Hello SnapBar");
 
 - 每条提示词之间用 `---` 分隔
 - `内容:` 后面支持多行
+- 新版导出会转义正文中的独立 `---` 和行首反斜杠，并保留首尾空白及类似 `title:` 的正文文本
 - `快捷键:` 可以留空
 - 推荐字段名使用：`标题`、`分类`、`快捷键`、`内容`
 - 目前也兼容旧格式，例如：
@@ -169,6 +192,7 @@ console.log("Hello SnapBar");
 ## 已知说明
 
 - 某些软件、输入法或高权限窗口下，模拟输入行为可能受系统限制
+- macOS 自动输入需要“辅助功能”权限；开发版和安装版可能被系统视为不同程序，需要分别授权
 - 全局快捷键如果与系统或其他软件冲突，会注册失败
 - 首次安装后如果桌面快捷方式图标未立即刷新，通常是 Windows 图标缓存导致
 

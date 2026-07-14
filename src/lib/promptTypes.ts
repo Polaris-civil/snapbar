@@ -25,6 +25,7 @@ export interface StorageData {
   version: number;
   timestamp: number;
   prompts: PromptItem[];
+  settings?: AppSettings;
 }
 
 export const DEFAULT_CATEGORY = "通用";

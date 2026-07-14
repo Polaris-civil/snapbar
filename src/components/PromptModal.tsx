@@ -1,6 +1,6 @@
 import React from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { CATEGORIES, getCategoryLabel } from '../store';
+import { validateShortcut } from '../lib/shortcut';
 
 interface PromptModalProps {
   isOpen: boolean;
@@ -60,12 +60,7 @@ export default function PromptModal({
   if (!isOpen) return null;
 
   const categoryOptions = Array.from(new Set([...CATEGORIES, ...categories.filter(Boolean)]));
-
-  const handleClose = async () => {
-    onClose();
-    await invoke('set_input_mode', { enable: false });
-    await invoke('set_panel_expanded', { expanded: false });
-  };
+  const shortcutError = validateShortcut(shortcut);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/42 px-4 py-6 backdrop-blur-sm">
@@ -92,7 +87,7 @@ export default function PromptModal({
                 onKeyDown={async (e) => {
                   e.stopPropagation();
                   if (e.key === 'Escape') {
-                    await handleClose();
+                    onClose();
                   }
                 }}
               />
@@ -110,7 +105,7 @@ export default function PromptModal({
                 onKeyDown={async (e) => {
                   e.stopPropagation();
                   if (e.key === 'Escape') {
-                    await handleClose();
+                    onClose();
                   }
                 }}
               />
@@ -130,7 +125,7 @@ export default function PromptModal({
                 <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{"\u5feb\u6377\u952e"}</div>
                 <p className="mt-1 text-sm text-slate-500">
                   {"\u70b9\u51fb\u8f93\u5165\u6846\u540e\uff0c\u6309\u4e0b\u7c7b\u4f3c "}
-                  <span className="font-medium text-slate-700">Shift+A</span>
+                  <span className="font-medium text-slate-700">Ctrl+Shift+A</span>
                   {" \u7684\u7ec4\u5408\u952e\u3002"}
                 </p>
               </div>
@@ -165,11 +160,13 @@ export default function PromptModal({
                 if (e.ctrlKey) parts.push('Ctrl');
                 if (e.altKey) parts.push('Alt');
                 if (e.shiftKey) parts.push('Shift');
-                if (e.metaKey) parts.push('Meta');
+                if (e.metaKey) parts.push('Command');
 
                 setShortcut([...parts, normalizeShortcutKey(e.key)].join('+'));
               }}
+              aria-invalid={Boolean(shortcutError)}
             />
+            {shortcutError && <p className="mt-2 text-xs text-rose-600">{shortcutError}</p>}
           </div>
 
           <label className="block">
@@ -183,7 +180,7 @@ export default function PromptModal({
               onKeyDown={async (e) => {
                 e.stopPropagation();
                 if (e.key === 'Escape') {
-                  await handleClose();
+                  onClose();
                 }
               }}
             />
@@ -192,7 +189,7 @@ export default function PromptModal({
           <div className="flex gap-3 pt-1">
             <button
               type="button"
-              onClick={handleClose}
+              onClick={onClose}
               className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
             >
               {"\u53d6\u6d88"}
