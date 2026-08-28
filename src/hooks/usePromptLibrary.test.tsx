@@ -27,6 +27,7 @@ describe("usePromptLibrary persistence", () => {
     expect(saved).toBe(false);
     expect(result.current.prompts).toEqual([]);
     expect(result.current.error).toContain("空间不足");
+    expect(result.current.pendingAction).toBeNull();
     setItem.mockRestore();
   });
 

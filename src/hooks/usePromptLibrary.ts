@@ -15,6 +15,7 @@ import {
 } from "../lib/promptStorage";
 import { loadSettings, saveSettings, SETTINGS_KEY } from "../lib/settingsStorage";
 import { analyzeShortcuts, canonicalizeShortcut, validateShortcut } from "../lib/shortcut";
+import type { PendingAction } from "../lib/uiState";
 import {
   ALL_CATEGORIES_FILTER,
   DEFAULT_CATEGORY,
@@ -61,6 +62,7 @@ export function usePromptLibrary() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [unavailableShortcuts, setUnavailableShortcuts] = useState<string[]>([]);
   const [canUndoRestore, setCanUndoRestore] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const eventSourceIdRef = useRef(`prompt-library-${Math.random().toString(36).slice(2)}`);
   const lastShortcutSignatureRef = useRef<string | null>(null);
   const lastShortcutResultRef = useRef<ShortcutSyncResult>({ registered: [], failed: [] });
@@ -237,6 +239,7 @@ export function usePromptLibrary() {
           ];
 
       setError(null);
+      setPendingAction("save-prompt");
       try {
         await savePrompts(nextPrompts, eventSourceIdRef.current);
         setPrompts(nextPrompts);
@@ -253,6 +256,8 @@ export function usePromptLibrary() {
       } catch (saveError) {
         setError(errorMessage(saveError, "保存提示词失败。"));
         return false;
+      } finally {
+        setPendingAction(null);
       }
     },
     [prompts, syncShortcuts],
@@ -262,6 +267,7 @@ export function usePromptLibrary() {
     async (id: string) => {
       const nextPrompts = prompts.filter((prompt) => prompt.id !== id);
       setError(null);
+      setPendingAction("delete-prompt");
       try {
         await savePrompts(nextPrompts, eventSourceIdRef.current);
         setPrompts(nextPrompts);
@@ -272,6 +278,8 @@ export function usePromptLibrary() {
       } catch (deleteError) {
         setError(errorMessage(deleteError, "删除提示词失败。"));
         return false;
+      } finally {
+        setPendingAction(null);
       }
     },
     [prompts, syncShortcuts],
@@ -279,6 +287,7 @@ export function usePromptLibrary() {
 
   const persistSettings = useCallback(async (nextSettings: AppSettings) => {
     setError(null);
+    setPendingAction("save-settings");
     try {
       await saveSettings(nextSettings);
       setSettings(nextSettings);
@@ -288,50 +297,68 @@ export function usePromptLibrary() {
     } catch (settingsError) {
       setError(errorMessage(settingsError, "保存设置失败。"));
       return false;
+    } finally {
+      setPendingAction(null);
     }
   }, []);
 
   const restoreFromFileContent = useCallback(
     async (content: string) => {
-      const ok = await restoreData(content, eventSourceIdRef.current);
-      if (ok) {
-        setStatusMessage("备份已恢复，可在设置中撤销本次恢复。");
-        await refresh({ forceShortcutSync: true });
-      } else {
-        setError("恢复备份失败，请检查文件内容。");
+      setPendingAction("restore");
+      try {
+        const ok = await restoreData(content, eventSourceIdRef.current);
+        if (ok) {
+          setStatusMessage("备份已恢复，可在设置中撤销本次恢复。");
+          await refresh({ forceShortcutSync: true });
+        } else {
+          setError("恢复备份失败，请检查文件内容。");
+        }
+        return ok;
+      } finally {
+        setPendingAction(null);
       }
-      return ok;
     },
     [refresh],
   );
 
   const importFromTxtContent = useCallback(
     async (content: string) => {
-      const result = await importPromptsTxt(content, eventSourceIdRef.current);
-      if (result.ok) {
-        setStatusMessage(result.message);
-        await refresh({ forceShortcutSync: true });
-      } else {
-        setError(result.message);
+      setPendingAction("import-txt");
+      try {
+        const result = await importPromptsTxt(content, eventSourceIdRef.current);
+        if (result.ok) {
+          setStatusMessage(result.message);
+          await refresh({ forceShortcutSync: true });
+        } else {
+          setError(result.message);
+        }
+        return result.ok;
+      } finally {
+        setPendingAction(null);
       }
-      return result.ok;
     },
     [refresh],
   );
 
   const undoRestore = useCallback(async () => {
-    const ok = await undoLastRestore(eventSourceIdRef.current);
-    if (ok) {
-      setStatusMessage("已撤销上次备份恢复。");
-      await refresh({ forceShortcutSync: true });
-    } else {
-      setError("没有可撤销的恢复记录，或恢复记录已损坏。");
+    setPendingAction("undo-restore");
+    try {
+      const ok = await undoLastRestore(eventSourceIdRef.current);
+      if (ok) {
+        setStatusMessage("已撤销上次备份恢复。");
+        await refresh({ forceShortcutSync: true });
+      } else {
+        setError("没有可撤销的恢复记录，或恢复记录已损坏。");
+      }
+      return ok;
+    } finally {
+      setPendingAction(null);
     }
-    return ok;
   }, [refresh]);
 
   const typePromptText = useCallback(async (text: string) => {
     setError(null);
+    setPendingAction("type-text");
     try {
       await invoke("type_text", { text });
       setStatusMessage("文本已输入到目标应用。");
@@ -339,29 +366,41 @@ export function usePromptLibrary() {
     } catch (inputError) {
       setError(errorMessage(inputError, "文本输入失败，请检查目标应用和系统权限。"));
       return false;
+    } finally {
+      setPendingAction(null);
     }
   }, []);
 
   const handleBackup = useCallback(async () => {
-    const result = await backupData();
-    if (result.ok) {
-      setStatusMessage(result.message);
-      setError(null);
-    } else if (result.message !== "用户已取消保存") {
-      setError(result.message);
+    setPendingAction("backup");
+    try {
+      const result = await backupData();
+      if (result.ok) {
+        setStatusMessage(result.message);
+        setError(null);
+      } else if (result.message !== "用户已取消保存") {
+        setError(result.message);
+      }
+      return result.ok;
+    } finally {
+      setPendingAction(null);
     }
-    return result.ok;
   }, []);
 
   const handleExportTxt = useCallback(async () => {
-    const result = await exportPromptsTxt();
-    if (result.ok) {
-      setStatusMessage(result.message);
-      setError(null);
-    } else if (result.message !== "用户已取消保存") {
-      setError(result.message);
+    setPendingAction("export-txt");
+    try {
+      const result = await exportPromptsTxt();
+      if (result.ok) {
+        setStatusMessage(result.message);
+        setError(null);
+      } else if (result.message !== "用户已取消保存") {
+        setError(result.message);
+      }
+      return result.ok;
+    } finally {
+      setPendingAction(null);
     }
-    return result.ok;
   }, []);
 
   return {
@@ -375,6 +414,7 @@ export function usePromptLibrary() {
     handleExportTxt,
     importFromTxtContent,
     isLoading,
+    pendingAction,
     persistSettings,
     prompts,
     restoreFromFileContent,

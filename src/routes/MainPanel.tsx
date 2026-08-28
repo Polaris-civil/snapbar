@@ -1,13 +1,20 @@
-﻿import React, { memo, useCallback, useDeferredValue, useMemo, useState, type CSSProperties } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { exit } from "@tauri-apps/plugin-process";
-import { Edit2, GripVertical, Minus, Plus, Settings, Trash2, X } from "lucide-react";
+import { Edit2, GripVertical, LoaderCircle, Minus, Plus, Power, Settings, Trash2 } from "lucide-react";
+import { memo, useCallback, useDeferredValue, useMemo, useState, type CSSProperties } from "react";
 import PromptModal from "../components/PromptModal";
 import SettingsModal from "../components/SettingsModal";
+import Dialog from "../components/ui/Dialog";
+import IconButton from "../components/ui/IconButton";
+import ShortcutKey from "../components/ui/ShortcutKey";
+import StatusNotice from "../components/ui/StatusNotice";
 import { usePromptLibrary } from "../hooks/usePromptLibrary";
+import { useUiTheme } from "../hooks/useUiTheme";
+import { detectDesktopPlatform } from "../lib/platform";
 import { canonicalizeShortcut } from "../lib/shortcut";
+import type { UiThemeMode } from "../lib/uiPreferences";
 import {
   ALL_CATEGORIES_FILTER,
   DEFAULT_CATEGORY,
@@ -22,39 +29,60 @@ interface DeleteDialogState {
   title: string;
 }
 
+interface AppFrameStyle extends CSSProperties {
+  "--prompt-scale": number;
+  "--user-tint": string;
+}
+
 function getDefaultCategory(categories: string[]) {
   return categories.find((item) => item !== ALL_CATEGORIES_FILTER && item.trim()) ?? DEFAULT_CATEGORY;
 }
 
 interface PromptTileProps {
   prompt: PromptItem;
-  buttonClassName: string;
-  buttonStyle: CSSProperties;
-  onPaste: (text: string, event: React.MouseEvent) => Promise<void>;
+  showShortcutHints: boolean;
+  shortcutUnavailable: boolean;
+  disabled: boolean;
+  onInput: (text: string) => Promise<void>;
   onEdit: (item: PromptItem, event: React.MouseEvent) => Promise<void>;
   onDelete: (item: PromptItem, event: React.MouseEvent) => Promise<void>;
 }
 
 const PromptTile = memo(function PromptTile({
   prompt,
-  buttonClassName,
-  buttonStyle,
-  onPaste,
+  showShortcutHints,
+  shortcutUnavailable,
+  disabled,
+  onInput,
   onEdit,
   onDelete,
 }: PromptTileProps) {
   return (
-    <div onClick={(event) => void onPaste(prompt.content, event)} className="group relative flex-shrink-0">
-      <button className={buttonClassName} style={buttonStyle} title={prompt.content}>
-        {prompt.title}
+    <div className="prompt-item">
+      <button
+        type="button"
+        className="prompt-primary"
+        title={prompt.content}
+        onClick={() => void onInput(prompt.content)}
+        disabled={disabled}
+      >
+        <span className="prompt-title">{prompt.title}</span>
+        {showShortcutHints && <ShortcutKey shortcut={prompt.shortcut} unavailable={shortcutUnavailable} />}
       </button>
-      <div className="absolute -right-2 -top-2 flex gap-1 rounded-full border border-white/10 bg-black/80 p-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-        <button onClick={(event) => void onEdit(prompt, event)} className="p-1 hover:text-blue-400">
-          <Edit2 size={10} />
-        </button>
-        <button onClick={(event) => void onDelete(prompt, event)} className="p-1 hover:text-red-400">
-          <Trash2 size={10} />
-        </button>
+      <div className="prompt-actions">
+        <IconButton
+          icon={<Edit2 size={14} aria-hidden="true" />}
+          label={`编辑“${prompt.title}”`}
+          onClick={(event) => void onEdit(prompt, event)}
+          disabled={disabled}
+        />
+        <IconButton
+          icon={<Trash2 size={14} aria-hidden="true" />}
+          label={`删除“${prompt.title}”`}
+          tone="danger"
+          onClick={(event) => void onDelete(prompt, event)}
+          disabled={disabled}
+        />
       </div>
     </div>
   );
@@ -70,6 +98,9 @@ export default function MainPanel() {
   const [shortcut, setShortcut] = useState("");
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
   const [settingsDraft, setSettingsDraft] = useState<AppSettings | null>(null);
+  const [themeModeDraft, setThemeModeDraft] = useState<UiThemeMode | null>(null);
+  const platform = detectDesktopPlatform();
+  const { persistThemeMode, themeMode } = useUiTheme();
 
   const {
     activeCategory,
@@ -82,11 +113,13 @@ export default function MainPanel() {
     handleExportTxt,
     importFromTxtContent,
     isLoading,
+    pendingAction,
     persistSettings,
     restoreFromFileContent,
     saveDraft,
     setActiveCategory,
     setError,
+    setStatusMessage,
     settings,
     statusMessage,
     storageUsage,
@@ -96,6 +129,19 @@ export default function MainPanel() {
   } = usePromptLibrary();
 
   const deferredPrompts = useDeferredValue(filteredPrompts);
+  const isBusy = pendingAction !== null;
+  const promptScale =
+    typeof settings.buttonSize === "number"
+      ? Math.max(0.78, settings.buttonSize / 100)
+      : settings.buttonSize === "small"
+        ? 0.85
+        : settings.buttonSize === "large"
+          ? 1.15
+          : 1;
+  const frameStyle: AppFrameStyle = {
+    "--prompt-scale": promptScale,
+    "--user-tint": settings.themeColor,
+  };
 
   const resetForm = useCallback(() => {
     setEditingId(null);
@@ -174,8 +220,8 @@ export default function MainPanel() {
     [importFromTxtContent, reportCommandError],
   );
 
-  const handlePaste = useCallback(
-    async (text: string, _event: React.MouseEvent) => {
+  const handlePromptInput = useCallback(
+    async (text: string) => {
       await typePromptText(text);
     },
     [typePromptText],
@@ -184,16 +230,19 @@ export default function MainPanel() {
   const handleDeleteRequest = useCallback(
     async (item: PromptItem, event: React.MouseEvent) => {
       event.stopPropagation();
+      setError(null);
+      setStatusMessage(null);
       await resizePanel(true);
       setDeleteDialog({ id: item.id, title: item.title });
     },
-    [resizePanel],
+    [resizePanel, setError, setStatusMessage],
   );
 
   const handleDeleteCancel = useCallback(async () => {
+    if (pendingAction === "delete-prompt") return;
     setDeleteDialog(null);
     await collapsePanelIfIdle();
-  }, [collapsePanelIfIdle]);
+  }, [collapsePanelIfIdle, pendingAction]);
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!deleteDialog) return;
@@ -206,6 +255,8 @@ export default function MainPanel() {
   const handleEdit = useCallback(
     async (item: PromptItem, event: React.MouseEvent) => {
       event.stopPropagation();
+      setError(null);
+      setStatusMessage(null);
       setEditingId(item.id);
       setTitle(item.title);
       setContent(item.content);
@@ -214,20 +265,23 @@ export default function MainPanel() {
       await resizePanel(true);
       setShowModal(true);
     },
-    [resizePanel],
+    [resizePanel, setError, setStatusMessage],
   );
 
   const openAddModal = useCallback(async () => {
+    setError(null);
+    setStatusMessage(null);
     resetForm();
     await resizePanel(true);
     setShowModal(true);
-  }, [resetForm, resizePanel]);
+  }, [resetForm, resizePanel, setError, setStatusMessage]);
 
   const closePromptModal = useCallback(async () => {
+    if (pendingAction === "save-prompt") return;
     setShowModal(false);
     resetForm();
     await resizePanel(false);
-  }, [resetForm, resizePanel]);
+  }, [pendingAction, resetForm, resizePanel]);
 
   const handleSave = useCallback(
     async (event: React.FormEvent) => {
@@ -245,28 +299,40 @@ export default function MainPanel() {
   );
 
   const openSettings = useCallback(async () => {
+    setError(null);
+    setStatusMessage(null);
     setSettingsDraft({ ...settings });
+    setThemeModeDraft(themeMode);
     await resizePanel(true);
     setShowSettings(true);
-  }, [resizePanel, settings]);
+  }, [resizePanel, setError, setStatusMessage, settings, themeMode]);
 
   const closeSettings = useCallback(async () => {
+    if (pendingAction) return;
     setShowSettings(false);
     setSettingsDraft(null);
+    setThemeModeDraft(null);
     await resizePanel(false);
-  }, [resizePanel]);
+  }, [pendingAction, resizePanel]);
 
   const handleSettingsSave = useCallback(
     async (event: React.FormEvent) => {
       event.preventDefault();
-      if (!settingsDraft) return;
+      if (!settingsDraft || !themeModeDraft) return;
       const saved = await persistSettings(settingsDraft);
       if (!saved) return;
+      try {
+        await persistThemeMode(themeModeDraft);
+      } catch (themeError) {
+        reportCommandError(themeError, "保存界面主题失败。");
+        return;
+      }
       setShowSettings(false);
       setSettingsDraft(null);
+      setThemeModeDraft(null);
       await resizePanel(false);
     },
-    [persistSettings, resizePanel, settingsDraft],
+    [persistSettings, persistThemeMode, reportCommandError, resizePanel, settingsDraft, themeModeDraft],
   );
 
   const handleUndoRestore = useCallback(async () => {
@@ -299,188 +365,158 @@ export default function MainPanel() {
     }
   }, [reportCommandError]);
 
-  const buttonClassName = useMemo(() => {
-    const base =
-      "bg-white/10 hover:bg-white/20 active:scale-95 rounded-lg whitespace-nowrap transition-all border border-white/5 truncate shadow-sm";
-
-    if (typeof settings.buttonSize === "string") {
-      switch (settings.buttonSize) {
-        case "small":
-          return `${base} px-3 py-1.5 text-xs max-w-[120px]`;
-        case "large":
-          return `${base} px-5 py-2.5 text-base max-w-[180px]`;
-        default:
-          return `${base} px-4 py-2 text-sm max-w-[150px]`;
-      }
-    }
-
-    return base;
-  }, [settings.buttonSize]);
-
-  const buttonStyle = useMemo<CSSProperties>(() => {
-    if (typeof settings.buttonSize === "string") return {};
-
-    const scale = settings.buttonSize / 100;
-    return {
-      fontSize: `${Math.max(10, 14 * scale)}px`,
-      padding: `${Math.max(4, 8 * scale)}px ${Math.max(8, 16 * scale)}px`,
-      maxWidth: `${Math.max(100, 150 * scale)}px`,
-    };
-  }, [settings.buttonSize]);
-
-  const unavailableShortcutSet = useMemo(() => {
-    return new Set(unavailableShortcuts.map((item) => item.toLowerCase()));
-  }, [unavailableShortcuts]);
+  const unavailableShortcutSet = useMemo(
+    () => new Set(unavailableShortcuts.map((item) => item.toLowerCase())),
+    [unavailableShortcuts],
+  );
 
   const emptyStateText = isLoading
-    ? "\u6b63\u5728\u52a0\u8f7d\u63d0\u793a\u8bcd..."
-    : deferredPrompts.length === 0 && activeCategory !== "\u5168\u90e8"
-      ? "\u5f53\u524d\u5206\u7c7b\u4e0b\u8fd8\u6ca1\u6709\u63d0\u793a\u8bcd\u3002"
-      : "\u8fd8\u6ca1\u6709\u4efb\u4f55\u63d0\u793a\u8bcd\uff0c\u70b9\u51fb\u53f3\u4fa7\u52a0\u53f7\u65b0\u5efa\u4e00\u4e2a\u3002";
+    ? "正在加载提示词…"
+    : deferredPrompts.length === 0 && activeCategory !== ALL_CATEGORIES_FILTER
+      ? "当前分类还没有提示词。"
+      : "还没有提示词，点击新增按钮创建一个。";
+  const statusKind = isLoading || pendingAction === "type-text" ? "loading" : error ? "error" : statusMessage ? "success" : "idle";
+  const statusText = isLoading
+    ? "正在加载提示词…"
+    : pendingAction === "type-text"
+      ? "正在输入文本…"
+      : error ?? statusMessage;
 
   return (
-    <div
-      className="flex h-screen items-center overflow-hidden rounded-xl border border-white/10 text-white shadow-xl backdrop-blur-md transition-opacity duration-200"
-      style={{ backgroundColor: settings.themeColor }}
-    >
-      <div
-        className="flex h-full w-8 cursor-move items-center justify-center transition-colors hover:bg-white/10"
-        onMouseDown={() => void startDragging()}
-      >
-        <GripVertical size={16} className="text-white/50" />
+    <div className={`app-frame platform-${platform}`} style={frameStyle}>
+      <div className="drag-handle" onMouseDown={() => void startDragging()} aria-hidden="true">
+        <GripVertical size={15} />
       </div>
 
-      <div className="relative flex h-full min-w-0 flex-1 flex-col px-2 py-2">
-        <div className="absolute right-2 top-2 z-10 flex items-center justify-end gap-2">
+      <main className="main-content">
+        <div className="toolbar-row">
+          <label className="sr-only" htmlFor="category-filter">
+            提示词分类
+          </label>
           <select
+            id="category-filter"
             value={activeCategory}
             onChange={(event) => setActiveCategory(event.target.value)}
-            className="rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-xs outline-none"
+            className="category-filter"
+            disabled={isLoading || isBusy}
           >
             {categories.map((item) => (
-              <option key={item} value={item} className="bg-slate-900">
+              <option key={item} value={item}>
                 {getCategoryLabel(item)}
               </option>
             ))}
           </select>
-        </div>
 
-        <div className="flex min-h-0 flex-1 items-center gap-2 overflow-x-auto pr-18 no-scrollbar">
-          {deferredPrompts.length === 0 ? (
-            <span className="px-2 text-xs text-white/55">{emptyStateText}</span>
-          ) : (
-            deferredPrompts.map((prompt) => (
-              <PromptTile
-                key={prompt.id}
-                prompt={prompt}
-                buttonClassName={buttonClassName}
-                buttonStyle={buttonStyle}
-                onPaste={handlePaste}
-                onEdit={handleEdit}
-                onDelete={handleDeleteRequest}
-              />
-            ))
-          )}
-        </div>
-
-        {settings.showShortcutHints && (
-          <div className="flex min-h-[16px] items-center gap-3 px-1 pt-1 text-[11px] leading-none">
-            {deferredPrompts.length > 0 && (
-              <div className="flex min-w-0 flex-1 gap-3 overflow-x-auto no-scrollbar text-white/60">
-                {deferredPrompts.map((prompt, index) => {
-                  const shortcutUnavailable =
-                    Boolean(prompt.shortcut) &&
-                    unavailableShortcutSet.has(canonicalizeShortcut(prompt.shortcut).toLowerCase());
-
-                  return (
-                    <span
-                      key={`${prompt.id}-shortcut-index`}
-                      className={`shrink-0 ${shortcutUnavailable ? "text-rose-300" : "text-white/60"}`}
-                      title={`${prompt.title}: ${prompt.shortcut || "\u672a\u8bbe\u7f6e\u5feb\u6377\u952e"}`}
-                    >
-                      {index + 1}. {prompt.shortcut || "\u672a\u8bbe\u7f6e\u5feb\u6377\u952e"}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
-            {(statusMessage || error) && (
-              <div className={`truncate ${error ? "text-rose-300" : "text-emerald-300"}`}>
-                {error ?? statusMessage}
-              </div>
+          <div className="prompt-scroller" aria-label="提示词列表">
+            {deferredPrompts.length === 0 ? (
+              <span className="empty-state">{emptyStateText}</span>
+            ) : (
+              deferredPrompts.map((prompt) => {
+                const shortcutUnavailable =
+                  Boolean(prompt.shortcut) &&
+                  unavailableShortcutSet.has(canonicalizeShortcut(prompt.shortcut).toLowerCase());
+                return (
+                  <PromptTile
+                    key={prompt.id}
+                    prompt={prompt}
+                    showShortcutHints={settings.showShortcutHints}
+                    shortcutUnavailable={shortcutUnavailable}
+                    disabled={isBusy}
+                    onInput={handlePromptInput}
+                    onEdit={handleEdit}
+                    onDelete={handleDeleteRequest}
+                  />
+                );
+              })
             )}
           </div>
-        )}
+        </div>
 
-        {!settings.showShortcutHints && (statusMessage || error) && (
-          <div className={`px-1 pt-1 text-[11px] leading-none ${error ? "text-rose-300" : "text-emerald-300"}`}>
-            <div className="truncate">{error ?? statusMessage}</div>
-          </div>
-        )}
-      </div>
+        <StatusNotice
+          kind={statusKind}
+          message={showModal || showSettings || deleteDialog ? null : statusText}
+          onDismiss={
+            error || statusMessage
+              ? () => {
+                  setError(null);
+                  setStatusMessage(null);
+                }
+              : undefined
+          }
+        />
+      </main>
 
-      <div className="flex h-full items-center gap-2 border-l border-white/10 px-3">
-        <button
-          onClick={openSettings}
-          className="rounded-lg p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-          title={"\u8bbe\u7f6e"}
-        >
-          <Settings size={18} />
-        </button>
-        <button
-          onClick={openAddModal}
-          className="rounded-lg p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-          title={"\u65b0\u589e"}
-        >
-          <Plus size={18} />
-        </button>
-        <div className="flex flex-col gap-1">
-          <button
+      <aside className="window-actions" aria-label="窗口操作">
+        <div className="window-actions-primary">
+          <IconButton
+            icon={<Settings size={17} aria-hidden="true" />}
+            label="设置"
+            onClick={() => void openSettings()}
+            disabled={isLoading || isBusy}
+          />
+          <IconButton
+            icon={<Plus size={18} aria-hidden="true" />}
+            label="新增提示词"
+            onClick={() => void openAddModal()}
+            disabled={isLoading || isBusy}
+          />
+        </div>
+        <div className="window-actions-system">
+          <IconButton
+            icon={<Minus size={17} aria-hidden="true" />}
+            label="最小化"
             onClick={() => void minimizeWindow()}
-            className="rounded-lg p-2 text-white/55 transition-colors hover:bg-white/10 hover:text-white"
-            title={"\u6700\u5c0f\u5316"}
-          >
-            <Minus size={18} />
-          </button>
-          <button
+            disabled={isBusy}
+          />
+          <IconButton
+            icon={<Power size={16} aria-hidden="true" />}
+            label="退出 SnapBar"
+            tone="danger"
             onClick={() => void exitApp()}
-            className="rounded-lg p-2 text-white/50 transition-colors hover:bg-red-500/20 hover:text-red-400"
-            title={"\u9000\u51fa"}
-          >
-            <X size={18} />
-          </button>
+            disabled={isBusy}
+          />
         </div>
-      </div>
+      </aside>
 
-      {deleteDialog && (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-[22px] border border-slate-200/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(246,248,252,0.98))] p-5 text-slate-900 shadow-[0_24px_70px_rgba(15,23,42,0.18)]">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-rose-600/80">{"\u5220\u9664\u786e\u8ba4"}</div>
-            <h3 className="mt-1.5 text-lg font-semibold">{"\u786e\u8ba4\u5220\u9664\u8fd9\u6761\u63d0\u793a\u8bcd"}</h3>
-            <p className="mt-2 text-sm text-slate-500">
-              <span className="font-medium text-slate-700">{deleteDialog.title}</span>
-              {" "}
-              {"\u5220\u9664\u540e\u65e0\u6cd5\u6062\u590d\u3002"}
-            </p>
-            <div className="mt-5 flex gap-3">
-              <button
-                type="button"
-                onClick={() => void handleDeleteCancel()}
-                className="flex-1 rounded-2xl border border-slate-200 bg-white py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
-              >
-                {"\u53d6\u6d88"}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleDeleteConfirm()}
-                className="flex-1 rounded-2xl bg-rose-500 py-3 text-sm font-semibold text-white transition-colors hover:bg-rose-600"
-              >
-                {"\u786e\u8ba4\u5220\u9664"}
-              </button>
-            </div>
+      <Dialog
+        open={Boolean(deleteDialog)}
+        onClose={() => void handleDeleteCancel()}
+        closeDisabled={pendingAction === "delete-prompt"}
+        title="删除提示词"
+        size="small"
+        footer={
+          <>
+            <button
+              type="button"
+              className="button"
+              onClick={() => void handleDeleteCancel()}
+              disabled={pendingAction === "delete-prompt"}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="button button-danger"
+              onClick={() => void handleDeleteConfirm()}
+              disabled={pendingAction === "delete-prompt"}
+            >
+              {pendingAction === "delete-prompt" && (
+                <LoaderCircle size={14} className="button-spinner" aria-hidden="true" />
+              )}
+              {pendingAction === "delete-prompt" ? "正在删除" : "确认删除"}
+            </button>
+          </>
+        }
+      >
+        {error && (
+          <div className="dialog-inline-status dialog-inline-error" role="alert">
+            {error}
           </div>
-        </div>
-      )}
+        )}
+        <p className="delete-copy">
+          确认删除 <strong>{deleteDialog?.title}</strong>？删除后无法恢复。
+        </p>
+      </Dialog>
 
       <SettingsModal
         isOpen={showSettings}
@@ -492,9 +528,14 @@ export default function MainPanel() {
         canUndoRestore={canUndoRestore}
         settings={settingsDraft ?? settings}
         setSettings={setSettingsDraft}
+        themeMode={themeModeDraft ?? themeMode}
+        setThemeMode={setThemeModeDraft}
         storageUsage={storageUsage}
         handleRestore={handleRestore}
         handleImportTxt={handleImportTxt}
+        pendingAction={pendingAction}
+        error={error}
+        statusMessage={statusMessage}
       />
 
       <PromptModal
@@ -511,6 +552,8 @@ export default function MainPanel() {
         categories={categories.filter((item) => item !== ALL_CATEGORIES_FILTER)}
         shortcut={shortcut}
         setShortcut={setShortcut}
+        isSaving={pendingAction === "save-prompt"}
+        error={error}
       />
     </div>
   );

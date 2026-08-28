@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { UI_THEME_KEY } from "../lib/uiPreferences";
 import MainPanel from "./MainPanel";
 
 const libraryState = {
@@ -16,6 +17,7 @@ const libraryState = {
   handleExportTxt: vi.fn(),
   importFromTxtContent: vi.fn(),
   isLoading: false,
+  pendingAction: null as null | "save-prompt" | "delete-prompt",
   persistSettings: vi.fn(),
   prompts: [],
   restoreFromFileContent: vi.fn(),
@@ -43,6 +45,8 @@ vi.mock("../hooks/usePromptLibrary", () => ({
 describe("MainPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    delete document.documentElement.dataset.theme;
     libraryState.activeCategory = "全部";
     libraryState.categories = ["全部", "通用", "代码"];
     libraryState.filteredPrompts = [
@@ -52,6 +56,7 @@ describe("MainPanel", () => {
     libraryState.error = null;
     libraryState.canUndoRestore = false;
     libraryState.statusMessage = null;
+    libraryState.pendingAction = null;
     libraryState.saveDraft = vi.fn().mockResolvedValue(true);
     libraryState.deletePrompt = vi.fn().mockResolvedValue(true);
     libraryState.persistSettings = vi.fn().mockResolvedValue(true);
@@ -84,6 +89,8 @@ describe("MainPanel", () => {
 
     fireEvent.click(screen.getAllByRole("button").find((button) => button.querySelector("svg.lucide-trash2"))!);
 
+    expect(await screen.findByRole("dialog", { name: "删除提示词" })).toHaveAttribute("aria-modal", "true");
+
     fireEvent.click(await screen.findByText("确认删除"));
 
     await waitFor(() => {
@@ -93,18 +100,19 @@ describe("MainPanel", () => {
 
   it("discards settings draft changes when the modal is cancelled", async () => {
     render(<MainPanel />);
-    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(await screen.findByRole("dialog", { name: "设置" })).toBeInTheDocument();
     fireEvent.click(await screen.findByTitle("青绿色"));
     fireEvent.click(screen.getByText("取消"));
 
-    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
     expect(await screen.findByDisplayValue("#00000080")).toBeInTheDocument();
     expect(libraryState.persistSettings).not.toHaveBeenCalled();
   });
 
   it("drops stale settings drafts after restoring a backup", async () => {
     render(<MainPanel />);
-    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
     fireEvent.click(await screen.findByTitle("青绿色"));
 
     const restoreInput = document.querySelector<HTMLInputElement>('input[type="file"][accept*="json"]')!;
@@ -118,11 +126,31 @@ describe("MainPanel", () => {
   it("drops stale settings drafts after undoing a restore", async () => {
     libraryState.canUndoRestore = true;
     render(<MainPanel />);
-    fireEvent.click(screen.getByTitle("设置"));
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
     fireEvent.click(await screen.findByTitle("青绿色"));
     fireEvent.click(screen.getByText("撤销上次恢复"));
 
     await waitFor(() => expect(libraryState.undoRestore).toHaveBeenCalled());
     expect(await screen.findByDisplayValue("#00000080")).toBeInTheDocument();
+  });
+
+  it("persists the selected UI theme without changing prompt settings shape", async () => {
+    render(<MainPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    fireEvent.click(await screen.findByRole("button", { name: "深色" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+
+    await waitFor(() => expect(localStorage.getItem(UI_THEME_KEY)).toBe("dark"));
+    expect(libraryState.persistSettings).toHaveBeenCalledWith(libraryState.settings);
+  });
+
+  it("exposes errors as dismissible live alerts", () => {
+    libraryState.error = "目标应用不可用";
+    render(<MainPanel />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("目标应用不可用");
+    fireEvent.click(screen.getByRole("button", { name: "关闭提示" }));
+    expect(libraryState.setError).toHaveBeenCalledWith(null);
+    expect(libraryState.setStatusMessage).toHaveBeenCalledWith(null);
   });
 });
